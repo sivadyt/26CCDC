@@ -1,21 +1,6 @@
 # ===============================
 # CCDC IIS HTTPS Redirect Script
 # ===============================
-
-Write-Host "=== IIS URL Rewrite + HTTPS Redirect Setup ===" -ForegroundColor Cyan
-
-# Check for admin
-if (-not ([Security.Principal.WindowsPrincipal] `
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Error "Run this script as Administrator."
-    exit 1
-}
-
-Import-Module WebAdministration
-
-
-
 #⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
 #⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
 #⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿
@@ -49,6 +34,20 @@ Import-Module WebAdministration
 #⢛⣄⠑⠪⠿⣖⡉⣿⣿⡁⠈⢿⣿⣿⣿⣿⣿⣿⣿⣿⡆⠈⢿⣿⣿⣿⣿⣿⠿⢋⡴⢿⣦⣅⡈⠻⠇⠟⠃⠂⠙⣿⣿⣿⣿⣿⣿⣿⣿⡇⣄⠲⢶⡀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠀
 #⠀⠹⢷⣌⢻⣫⡥⡄⠻⡿⠦⡀⠉⠲⡶⢿⣿⡿⣿⣿⣷⠸⣆⠻⣿⣿⡿⢡⡴⢟⣤⣾⣿⣿⣿⣿⣶⣤⣄⣀⣀⠈⠙⠿⢿⣿⣿⣿⣿⡇⣿⣷⣄⠀⠀⢤⠈⠀⠀⠀⠀⠀⠀⠀⠀
 #⠀⠀⠐⠻⡧⠈⠽⡋⢄⣀⠓⣛⡢⠀⠀⠹⠿⣿⣿⡿⢋⠄⢻⣦⠻⢿⠁⢂⣴⣿⣿⣿⣿⣈⣙⡛⠿⠿⠿⠿⠿⣿⢸⣿⣶⣦⣍⡛⢿⡇⣿⣿⣿⣿⡦⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+
+Write-Host "=== IIS URL Rewrite + HTTPS Redirect Setup ===" -ForegroundColor Cyan
+
+# Check for admin
+if (-not ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Error "Run this script as Administrator."
+    exit 1
+}
+
+Import-Module WebAdministration
+
 
 
 # -------------------------------
