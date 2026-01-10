@@ -1,11 +1,12 @@
 <#
 ================================================================================
-AUTO ClamAV INSTALL + CONFIG SCRIPT (NO ARGUMENTS REQUIRED)
+AUTO ClamAV ZIP INSTALL + CONFIG SCRIPT (NO ARGUMENTS)
 ================================================================================
-- Downloads ClamAV Windows x64 automatically
-- Installs silently
-- Fixes config files
+- Downloads ClamAV 1.5.1 ZIP
+- Extracts to C:\ClamAV
 - Creates database folder
+- Copies conf_examples files INTO database folder
+- Fixes clamd.conf + freshclam.conf
 - Removes "Example" line
 - Runs freshclam
 ================================================================================
@@ -14,93 +15,95 @@ AUTO ClamAV INSTALL + CONFIG SCRIPT (NO ARGUMENTS REQUIRED)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# ---------------- ADMIN CHECK ----------------
 function Assert-Admin {
-  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-  $p  = New-Object Security.Principal.WindowsPrincipal($id)
-  if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "Run PowerShell as Administrator."
-  }
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $p  = New-Object Security.Principal.WindowsPrincipal($id)
+    if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw "Run PowerShell as Administrator."
+    }
 }
-
 Assert-Admin
 
-Write-Host "[*] Starting ClamAV automated installation..."
+Write-Host "[*] Starting ClamAV ZIP installation..."
 
-# ---------------- DOWNLOAD ----------------
-$downloadUrl = "https://www.clamav.net/downloads/production/clamav-1.4.2.win.x64.msi"
-$tempDir = "$env:TEMP\clamav"
-$msiPath = "$tempDir\clamav.msi"
+# ---------------- VARIABLES ----------------
+$zipUrl     = "https://www.clamav.net/downloads/production/clamav-1.5.1.win.x64.zip"
+$tempDir   = "$env:TEMP\clamav"
+$zipPath   = "$tempDir\clamav.zip"
+$installDir = "C:\ClamAV"
+$dbDir     = "$installDir\database"
+$confExamples = "$installDir\conf_examples"
 
+# ---------------- DOWNLOAD ZIP ----------------
 if (-not (Test-Path $tempDir)) {
-  New-Item -ItemType Directory -Path $tempDir | Out-Null
+    New-Item -ItemType Directory -Path $tempDir | Out-Null
 }
 
-if (-not (Test-Path $msiPath)) {
-  Write-Host "[*] Downloading ClamAV..."
-  Invoke-WebRequest -Uri $downloadUrl -OutFile $msiPath -UseBasicParsing
+if (-not (Test-Path $zipPath)) {
+    Write-Host "[*] Downloading ClamAV ZIP..."
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
 } else {
-  Write-Host "[*] ClamAV MSI already downloaded."
+    Write-Host "[*] ZIP already downloaded."
 }
 
-# ---------------- INSTALL ----------------
-Write-Host "[*] Installing ClamAV..."
-Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn /norestart" -Wait
-
-# ---------------- LOCATE INSTALL ----------------
-$installDir = "C:\Program Files\ClamAV"
+# ---------------- EXTRACT ----------------
+Write-Host "[*] Extracting ZIP to $installDir..."
 if (-not (Test-Path $installDir)) {
-  throw "ClamAV install directory not found."
+    New-Item -ItemType Directory -Path $installDir | Out-Null
 }
 
-Write-Host "[+] ClamAV installed at: $installDir"
+Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
 
 # ---------------- DATABASE DIR ----------------
-$dbDir = "$installDir\database"
 if (-not (Test-Path $dbDir)) {
-  Write-Host "[*] Creating database directory..."
-  New-Item -ItemType Directory -Path $dbDir | Out-Null
+    Write-Host "[*] Creating database directory..."
+    New-Item -ItemType Directory -Path $dbDir | Out-Null
 }
 
-# ---------------- REGISTRY ----------------
-$regPath = "HKLM:\SOFTWARE\ClamAV"
-if (-not (Test-Path $regPath)) {
-  New-Item -Path $regPath | Out-Null
+# ---------------- COPY conf_examples INTO database ----------------
+if (Test-Path $confExamples) {
+    Write-Host "[*] Copying conf_examples files into database folder..."
+    Copy-Item -Path "$confExamples\*" -Destination $dbDir -Recurse -Force
+} else {
+    Write-Warning "conf_examples directory not found."
 }
-
-Set-ItemProperty -Path $regPath -Name ConfDir -Value $installDir -Force
-Set-ItemProperty -Path $regPath -Name DataDir -Value $dbDir -Force
 
 # ---------------- CONFIG FILES ----------------
-$confExamples = "$installDir\conf_examples"
-$clamdSample = "$confExamples\clamd.conf.sample"
-$freshSample = "$confExamples\freshclam.conf.sample"
+$clamdSample  = "$confExamples\clamd.conf.sample"
+$freshSample  = "$confExamples\freshclam.conf.sample"
+$clamdConf    = "$installDir\clamd.conf"
+$freshConf    = "$installDir\freshclam.conf"
 
-$clamdConf = "$installDir\clamd.conf"
-$freshConf = "$installDir\freshclam.conf"
+Copy-Item $clamdSample  $clamdConf  -Force
+Copy-Item $freshSample  $freshConf  -Force
 
-Copy-Item $clamdSample $clamdConf -Force
-Copy-Item $freshSample $freshConf -Force
+function Fix-Config {
+    param ($file)
 
-function Fix-Config($file) {
-  $content = Get-Content $file
-  $content = $content | Where-Object { $_ -notmatch '^\s*#?\s*Example\s*$' }
+    $content = Get-Content $file
 
-  if ($content -notmatch '^DatabaseDirectory') {
+    # Remove Example line
+    $content = $content | Where-Object { $_ -notmatch '^\s*#?\s*Example\s*$' }
+
+    # Fix DatabaseDirectory
+    $content = $content | Where-Object { $_ -notmatch '^\s*#?\s*DatabaseDirectory' }
     $content += "DatabaseDirectory `"$dbDir`""
-  }
 
-  Set-Content -Path $file -Value $content -Encoding UTF8
+    Set-Content -Path $file -Value $content -Encoding UTF8
 }
 
 Fix-Config $clamdConf
 Fix-Config $freshConf
 
-# ---------------- UPDATE SIGNATURES ----------------
+# ---------------- RUN FRESHCLAM ----------------
 $freshclamExe = "$installDir\freshclam.exe"
 if (Test-Path $freshclamExe) {
-  Write-Host "[*] Running freshclam..."
-  Start-Process $freshclamExe -Wait
+    Write-Host "[*] Running freshclam to download signatures..."
+    Start-Process $freshclamExe -Wait
+} else {
+    Write-Warning "freshclam.exe not found."
 }
 
 Write-Host ""
-Write-Host "[✔] ClamAV installed and configured successfully."
+Write-Host "[✔] ClamAV ZIP installation and configuration complete."
