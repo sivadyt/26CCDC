@@ -1,22 +1,15 @@
 <#
-CCDC Disk Space Monitor
+CCDC Disk Space Monitor (Event Log ONLY)
 - Alerts at 50%, 80%, 90% used
 - Writes to Windows Application Event Log (Source: CCDC-DiskMonitor)
-- Optional email alerts (if SMTP params provided)
 - State + cooldown to prevent spam
 #>
 
 [CmdletBinding()]
 param(
   [int]$CooldownMinutes = 240,
-
-  # Optional email settings (leave blank to disable email)
-  [string]$SmtpServer,
-  [int]$SmtpPort = 25,
-  [switch]$UseSsl,
-  [string]$To,
-  [string]$From,
-  [string]$SubjectPrefix = "[CCDC DiskMonitor]"
+  [switch]$VerboseOutput,
+  [switch]$ForceAlert
 )
 
 Set-StrictMode -Version Latest
@@ -39,12 +32,8 @@ if (Test-Path $stateFile) {
     if ($raw.Trim().Length -gt 0) {
       $state = ($raw | ConvertFrom-Json -ErrorAction Stop)
     }
-  } catch {
-    $state = @{} # corrupt state -> reset
-  }
+  } catch { $state = @{} }
 }
-
-# Ensure we can treat it like a dictionary
 if ($state -isnot [System.Collections.IDictionary]) { $state = @{} }
 
 # ----------------------------
@@ -53,12 +42,11 @@ if ($state -isnot [System.Collections.IDictionary]) { $state = @{} }
 $eventSource = "CCDC-DiskMonitor"
 $eventLog    = "Application"
 
-try {
+function Ensure-EventSource {
+  # Creating an event source generally requires Admin the first time.
   if (-not [System.Diagnostics.EventLog]::SourceExists($eventSource)) {
     New-EventLog -LogName $eventLog -Source $eventSource
   }
-} catch {
-  # If no permission to create source, Write-EventLog may fail later.
 }
 
 function Write-DiskEvent {
@@ -71,48 +59,21 @@ function Write-DiskEvent {
   Write-EventLog -LogName $eventLog -Source $eventSource -EventId $EventId -EntryType $EntryType -Message $Message
 }
 
-function Send-DiskEmail {
-  param([string]$Subject, [string]$Body)
-
-  if ([string]::IsNullOrWhiteSpace($SmtpServer) -or
-      [string]::IsNullOrWhiteSpace($To) -or
-      [string]::IsNullOrWhiteSpace($From)) {
-    return
-  }
-
-  $mailParams = @{
-    SmtpServer = $SmtpServer
-    Port       = $SmtpPort
-    To         = $To
-    From       = $From
-    Subject    = $Subject
-    Body       = $Body
-  }
-  if ($UseSsl) { $mailParams.UseSsl = $true }
-
-  Send-MailMessage @mailParams
-}
-
-function Get-Tier {
-  param([int]$PercentUsed)
+function Get-Tier([int]$PercentUsed) {
   if ($PercentUsed -ge 90) { return 90 }
   if ($PercentUsed -ge 80) { return 80 }
   if ($PercentUsed -ge 50) { return 50 }
   return 0
 }
 
-function Should-Alert {
-  param([string]$DriveKey, [int]$NewTier, [int]$CooldownMinutes)
-
+function Should-Alert([string]$DriveKey,[int]$NewTier,[int]$CooldownMinutes) {
   if ($NewTier -eq 0) { return $false }
-
   $now = [DateTime]::UtcNow
 
   if (-not $state.Contains($DriveKey)) { return $true }
 
   $lastTier = 0
   $lastUtc  = $null
-
   try { $lastTier = [int]$state[$DriveKey].lastTier } catch { $lastTier = 0 }
   try { $lastUtc  = [DateTime]::Parse($state[$DriveKey].lastAlertUtc).ToUniversalTime() } catch { $lastUtc = $null }
 
@@ -121,15 +82,14 @@ function Should-Alert {
 
   # Same tier -> only alert after cooldown
   if ($NewTier -eq $lastTier -and $lastUtc) {
-    return (($now - $lastUtc).TotalMinutes -ge $CooldownMinutes)
+    return ((($now - $lastUtc).TotalMinutes) -ge $CooldownMinutes)
   }
 
   return $true
 }
 
 function Save-State {
-  $json = ($state | ConvertTo-Json -Depth 5)
-  Set-Content -Path $stateFile -Value $json -Encoding UTF8
+  ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $stateFile -Encoding UTF8
 }
 
 # ----------------------------
@@ -138,12 +98,26 @@ function Save-State {
 $disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
   Select-Object DeviceID, VolumeName, Size, FreeSpace
 
+$eventSourceReady = $true
+try {
+  Ensure-EventSource
+} catch {
+  $eventSourceReady = $false
+  if ($VerboseOutput) {
+    Write-Host "WARNING: Could not create/use Event Source '$eventSource' in '$eventLog'. Run once as Administrator to register the source."
+    Write-Host "Error: $($_.Exception.Message)"
+  }
+}
+
 foreach ($d in $disks) {
   if (-not $d.Size -or $d.Size -le 0) { continue }
 
   $usedBytes = [double]($d.Size - $d.FreeSpace)
   $pctUsed   = [int][Math]::Round(($usedBytes / [double]$d.Size) * 100, 0)
-  $tier      = Get-Tier -PercentUsed $pctUsed
+  $tier      = Get-Tier $pctUsed
+
+  # Testing mode: force an alert at 50 tier even if under 50
+  if ($ForceAlert -and $tier -eq 0) { $tier = 50 }
 
   $driveKey = "$($d.DeviceID)"
   $volName  = if ([string]::IsNullOrWhiteSpace($d.VolumeName)) { "(no label)" } else { $d.VolumeName }
@@ -152,8 +126,12 @@ foreach ($d in $disks) {
   $freeGB = [Math]::Round(($d.FreeSpace / 1GB), 2)
   $usedGB = [Math]::Round(($usedBytes / 1GB), 2)
 
+  if ($VerboseOutput) {
+    Write-Host ("{0} {1}  Used={2}%  UsedGB={3}  FreeGB={4}  SizeGB={5}" -f $driveKey, $volName, $pctUsed, $usedGB, $freeGB, $sizeGB)
+  }
+
   # Below 50%: clear state so future threshold crossings re-alert
-  if ($tier -eq 0) {
+  if (-not $ForceAlert -and $tier -eq 0) {
     if ($state.Contains($driveKey)) {
       $state.Remove($driveKey) | Out-Null
       Save-State
@@ -161,23 +139,12 @@ foreach ($d in $disks) {
     continue
   }
 
-  if (-not (Should-Alert -DriveKey $driveKey -NewTier $tier -CooldownMinutes $CooldownMinutes)) {
-    continue
+  if (-not $ForceAlert) {
+    if (-not (Should-Alert $driveKey $tier $CooldownMinutes)) { continue }
   }
 
-  $eventId = switch ($tier) {
-    50 { 5050 }
-    80 { 5080 }
-    90 { 5090 }
-    default { 5000 }
-  }
-
-  $entryType = switch ($tier) {
-    50 { "Information" }
-    80 { "Warning" }
-    90 { "Error" }
-    default { "Warning" }
-  }
+  $eventId = switch ($tier) { 50 {5050} 80 {5080} 90 {5090} default {5000} }
+  $entryType = switch ($tier) { 50 {"Information"} 80 {"Warning"} 90 {"Error"} default {"Warning"} }
 
   $msg = @"
 Disk usage threshold reached.
@@ -190,15 +157,19 @@ Host:       $env:COMPUTERNAME
 Time (UTC): $([DateTime]::UtcNow.ToString("o"))
 "@
 
-  try { Write-DiskEvent -EventId $eventId -EntryType $entryType -Message $msg } catch { }
-
-  $subject = "$SubjectPrefix $env:COMPUTERNAME $driveKey at $pctUsed% (Tier $tier%)"
-  try { Send-DiskEmail -Subject $subject -Body $msg } catch { }
-
-  $state[$driveKey] = @{
-    lastTier     = $tier
-    lastAlertUtc = [DateTime]::UtcNow.ToString("o")
+  if ($eventSourceReady) {
+    try {
+      Write-DiskEvent -EventId $eventId -EntryType $entryType -Message $msg
+      if ($VerboseOutput) { Write-Host "EventLog written: Source=$eventSource ID=$eventId Level=$entryType" }
+    } catch {
+      if ($VerboseOutput) { Write-Host "WARNING: Write-EventLog failed: $($_.Exception.Message)" }
+    }
+  } elseif ($VerboseOutput) {
+    Write-Host "WARNING: EventLog not available (source not registered). Run script once as Administrator."
   }
+
+  # Update state
+  $state[$driveKey] = @{ lastTier = $tier; lastAlertUtc = [DateTime]::UtcNow.ToString("o") }
   Save-State
 }
 
