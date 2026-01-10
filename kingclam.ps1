@@ -14,7 +14,8 @@ Sleep 5
 Write-Host "Done"
 
 Write-Host "Updating database..."
-Start-Process -FilePath "C:\Program Files\ClamAV\freshclam.exe"
+Start-Process -FilePath "C:\Program Files\ClamAV\freshclam.exe" -Wait
 Write-Host "Done"
+
 
 Read-Host "Press Enter to finish...."
