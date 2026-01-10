@@ -1,8 +1,9 @@
 <#
-ClamAV 1.5.1 ZIP install -> Program Files
-Creates Database folder
-Converts *.conf.sample -> *.conf (removes Example line)
-Runs freshclam
+ClamAV 1.5.1 MSI install + config setup + freshclam
+- Downloads MSI
+- Installs to C:\Program Files\ClamAV (default)
+- Converts conf_examples\*.conf.sample -> ClamAV\*.conf (removes Example line)
+- Runs freshclam
 #>
 
 Set-StrictMode -Version Latest
@@ -22,7 +23,7 @@ function Ensure-Dir([string]$Path) {
     }
 }
 
-function Remove-ExampleLineAndWrite([string]$Source, [string]$Dest, [string]$DbDir) {
+function Remove-ExampleLineAndWrite([string]$Source, [string]$Dest) {
     if (-not (Test-Path $Source)) { throw "Missing file: $Source" }
 
     $lines = Get-Content -Path $Source -ErrorAction Stop
@@ -30,84 +31,67 @@ function Remove-ExampleLineAndWrite([string]$Source, [string]$Dest, [string]$DbD
     # Remove lines that are exactly "Example" or "# Example" (any whitespace allowed)
     $lines = $lines | Where-Object { $_ -notmatch '^\s*#?\s*Example\s*$' }
 
-    # Ensure DatabaseDirectory points to our Database folder
-    # Remove any existing DatabaseDirectory (commented or not), then add ours
-    $lines = $lines | Where-Object { $_ -notmatch '^\s*#?\s*DatabaseDirectory\s+' }
-    $lines += "DatabaseDirectory `"$DbDir`""
-
     Set-Content -Path $Dest -Value $lines -Encoding UTF8
 }
 
 # ---------------- MAIN ----------------
 Assert-Admin
 
-$zipUrl = "https://www.clamav.net/downloads/production/clamav-1.5.1.win.x64.zip"
+$msiUrl  = "https://www.clamav.net/downloads/production/clamav-1.5.1.win.x64.msi"
+$tempDir = Join-Path $env:TEMP "clamav_msi"
+$msiPath = Join-Path $tempDir "clamav-1.5.1.win.x64.msi"
 
-$tempDir = Join-Path $env:TEMP "clamav_zip"
-$zipPath = Join-Path $tempDir "clamav-1.5.1.win.x64.zip"
+$installDir = Join-Path ${env:ProgramFiles} "ClamAV"
+$confExamplesDir = Join-Path $installDir "conf_examples"
 
-$programFiles = ${env:ProgramFiles}
-$extractRoot  = $programFiles                       # unzip into Program Files
-$expectedDir  = Join-Path $programFiles "clamav-1.5.1.win.x64"
-$dbDir        = Join-Path $expectedDir "Database"
-$confExamples = Join-Path $expectedDir "conf_examples"
-
-Write-Host "[*] Using Program Files: $programFiles"
+Write-Host "[*] Preparing temp folder..."
 Ensure-Dir $tempDir
 
-# Download ZIP
-Write-Host "[*] Downloading ZIP..."
-Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+Write-Host "[*] Downloading ClamAV MSI..."
+Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
 
-# Extract ZIP into Program Files
-Write-Host "[*] Extracting ZIP into $extractRoot ..."
-Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+Write-Host "[*] Installing ClamAV (silent)..."
+$proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @(
+    "/i", "`"$msiPath`"",
+    "/qn",
+    "/norestart"
+) -Wait -PassThru
 
-# Confirm extracted folder exists (ZIP contains clamav-1.5.1.win.x64)
-if (-not (Test-Path $expectedDir)) {
-    # Sometimes zip extracts into another nested folder, try to find it
-    $found = Get-ChildItem -Path $extractRoot -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "clamav-1.5.1.win.x64*" } |
-        Select-Object -First 1
-
-    if ($found) {
-        $expectedDir  = $found.FullName
-        $dbDir        = Join-Path $expectedDir "Database"
-        $confExamples = Join-Path $expectedDir "conf_examples"
-        Write-Host "[*] Found extracted folder at: $expectedDir"
-    } else {
-        throw "Could not find extracted folder 'clamav-1.5.1.win.x64' in Program Files after unzip."
-    }
+if ($proc.ExitCode -ne 0) {
+    throw "MSI install failed. msiexec exit code: $($proc.ExitCode)"
 }
 
-# Create Database folder inside clamav-1.5.1.win.x64
-Write-Host "[*] Creating Database folder: $dbDir"
-Ensure-Dir $dbDir
+# Confirm install path exists
+if (-not (Test-Path $installDir)) {
+    throw "Expected install directory not found: $installDir"
+}
 
-# Locate sample config files
-$clamdSample = Join-Path $confExamples "clamd.conf.sample"
-$freshSample = Join-Path $confExamples "freshclam.conf.sample"
+Write-Host "[+] ClamAV install directory: $installDir"
 
-if (-not (Test-Path $confExamples)) {
-    throw "conf_examples folder not found: $confExamples"
+# Locate sample configs
+$clamdSample  = Join-Path $confExamplesDir "clamd.conf.sample"
+$freshSample  = Join-Path $confExamplesDir "freshclam.conf.sample"
+
+if (-not (Test-Path $confExamplesDir)) {
+    throw "conf_examples folder not found: $confExamplesDir"
 }
 if (-not (Test-Path $clamdSample)) { throw "Missing: $clamdSample" }
 if (-not (Test-Path $freshSample)) { throw "Missing: $freshSample" }
 
-# Create final config files inside Database (remove .sample and remove Example line)
-$clamdConfOut = Join-Path $dbDir "clamd.conf"
-$freshConfOut = Join-Path $dbDir "freshclam.conf"
+# Write final configs into the ClamAV folder (remove .sample)
+$clamdConfOut = Join-Path $installDir "clamd.conf"
+$freshConfOut = Join-Path $installDir "freshclam.conf"
 
-Write-Host "[*] Writing cleaned configs to Database folder..."
-Remove-ExampleLineAndWrite -Source $clamdSample -Dest $clamdConfOut -DbDir $dbDir
-Remove-ExampleLineAndWrite -Source $freshSample -Dest $freshConfOut -DbDir $dbDir
+Write-Host "[*] Creating clamd.conf and freshclam.conf in $installDir ..."
+Remove-ExampleLineAndWrite -Source $clamdSample -Dest $clamdConfOut
+Remove-ExampleLineAndWrite -Source $freshSample -Dest $freshConfOut
 
-Write-Host "[+] Created:"
+Write-Host "[+] Wrote:"
 Write-Host "    $clamdConfOut"
 Write-Host "    $freshConfOut"
 
-# Run freshclam using the config we just wrote
-$freshclamExe = Join-Path $expectedDir "freshclam.exe"
+# Run freshclam
+$freshclamExe = Join-Path $installDir "freshclam.exe"
 if (-not (Test-Path $freshclamExe)) {
     throw "freshclam.exe not found at: $freshclamExe"
 }
@@ -115,4 +99,4 @@ if (-not (Test-Path $freshclamExe)) {
 Write-Host "[*] Running freshclam..."
 Start-Process -FilePath $freshclamExe -ArgumentList @("--config-file=$freshConfOut") -Wait
 
-Write-Host "`n[✔] Done. ClamAV extracted, Database folder created, configs generated, freshclam ran."
+Write-Host "`n[✔] Done: Installed ClamAV, created configs, and ran freshclam."
