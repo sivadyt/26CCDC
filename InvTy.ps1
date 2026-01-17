@@ -1,69 +1,54 @@
-Write-Host "===== OS LEVEL / UPGRADE ASSESSMENT =====`n"
+Write-Host "===== SYSTEM OS OVERVIEW =====`n"
 
-# Device name
+# Device Name
 $DeviceName = $env:COMPUTERNAME
 Write-Host "Device Name:"
 Write-Host " - $DeviceName`n"
 
-# IP address(es)
-$IPAddresses = Get-NetIPAddress -AddressFamily IPv4 |
-    Where-Object {
-        $_.IPAddress -notlike "169.254*" -and
-        $_.IPAddress -ne "127.0.0.1"
-    } |
-    Select-Object -ExpandProperty IPAddress -Unique
+# Network Info (IP + MAC)
+$Adapters = Get-NetAdapter |
+    Where-Object { $_.Status -eq "Up" }
 
-Write-Host "Device IP Address(es):"
-if ($IPAddresses) {
-    $IPAddresses | ForEach-Object { Write-Host " - $_" }
-} else {
-    Write-Host " - No IPv4 address found"
+Write-Host "Network Information:"
+foreach ($Adapter in $Adapters) {
+    $IP = Get-NetIPAddress -InterfaceIndex $Adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+          Where-Object { $_.IPAddress -notlike "169.254*" } |
+          Select-Object -ExpandProperty IPAddress -First 1
+
+    Write-Host " - Interface: $($Adapter.Name)"
+    Write-Host "   IP Address: $IP"
+    Write-Host "   MAC Address: $($Adapter.MacAddress)"
 }
 Write-Host ""
 
-# OS installed
+# OS Installed
 $OS = Get-CimInstance Win32_OperatingSystem
 $Build = $OS.BuildNumber
 $UBR = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").UBR
 $DisplayVersion = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").DisplayVersion
 
 Write-Host "Current OS Level Installed:"
-Write-Host " - OS Name: $($OS.Caption)"
+Write-Host " - OS: $($OS.Caption)"
 Write-Host " - Version: $DisplayVersion"
 Write-Host " - Build: $Build.$UBR`n"
 
-# Check available updates (manufacturer / Microsoft)
-Write-Host "Current Production OS Level Available:"
-try {
-    $Session = New-Object -ComObject Microsoft.Update.Session
-    $Searcher = $Session.CreateUpdateSearcher()
-    $Results = $Searcher.Search("IsInstalled=0 and IsHidden=0")
+# Simple Update Status (NOT enumerating updates)
+$LastUpdate = Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1
 
-    if ($Results.Updates.Count -gt 0) {
-        Write-Host " - Pending updates detected: $($Results.Updates.Count)"
-        foreach ($Update in $Results.Updates) {
-            if ($Update.Title -match "Feature update") {
-                Write-Host "   * FEATURE UPGRADE AVAILABLE: $($Update.Title)"
-            }
-        }
-    } else {
-        Write-Host " - OS is fully up to date"
-    }
-}
-catch {
-    Write-Host " - Unable to query Windows Update"
+Write-Host "Current Production OS Level Available:"
+if ($LastUpdate) {
+    Write-Host " - Last installed update: $($LastUpdate.HotFixID)"
+    Write-Host " - Installed on: $($LastUpdate.InstalledOn)"
+    Write-Host " - Interpretation: System appears to be receiving updates"
+} else {
+    Write-Host " - Unable to determine update status"
 }
 Write-Host ""
 
-# Assessment
+# Assessment (High-Level / Non-invasive)
 Write-Host "Assessment:"
-if ($Results.Updates.Count -gt 0) {
-    Write-Host " - System is missing updates."
-    Write-Host " - Missing patches may represent significant vulnerabilities."
-    Write-Host " - Recommendation: Apply updates and upgrade OS if a feature update is available."
-} else {
-    Write-Host " - OS is current."
-    Write-Host " - No significant OS-level vulnerabilities related to missing updates detected."
-}
+Write-Host " - OS information and patch history indicate the system is operational."
+Write-Host " - No deep vulnerability or configuration inspection was performed."
+Write-Host " - Recommendation: Ensure OS remains within vendor support lifecycle and receives regular updates."
 
-Write-Host "`n========================================"
+Write-Host "`n=============================="
