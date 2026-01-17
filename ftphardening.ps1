@@ -98,6 +98,9 @@ Write-Host "[OK] Firewall enabled (all profiles)."
 netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound | Out-Null
 Write-Host "[OK] Firewall policy set: block inbound / block outbound."
 
+# Disable default inbound firewall rules
+Get-NetFirewallRule -Direction Inbound -ErrorAction SilentlyContinue | Disable-NetFirewallRule -ErrorAction SilentlyContinue
+
 # --- Allow FTP control + passive ports (TCP) ---
 $passiveStart, $passiveEnd = $PassivePortRange.Split("-")
 New-NetFirewallRule -DisplayName "CCDC-FTP-Control" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $FtpControlPort -Profile Any | Out-Null
