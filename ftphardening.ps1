@@ -96,7 +96,7 @@ Write-Host "[OK] Firewall enabled (all profiles)."
 
 # Block inbound and outbound by default
 netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound | Out-Null
-Write-Host "[OK] Firewall policy set: block inbound / allow outbound."
+Write-Host "[OK] Firewall policy set: block inbound / block outbound."
 
 # --- Allow FTP control + passive ports (TCP) ---
 $passiveStart, $passiveEnd = $PassivePortRange.Split("-")
