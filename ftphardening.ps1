@@ -90,12 +90,12 @@ auditpol /set /subcategory:"Process Creation" /success:enable /failure:disable |
 Write-Host "[OK] Audit policy enabled (logon/account/policy/process creation)."
 
 # --- Windows Firewall: default deny inbound, then allow only what you need ---
-# Ensure firewall enabled
+# Ensure firewall is enabled
 netsh advfirewall set allprofiles state on | Out-Null
 Write-Host "[OK] Firewall enabled (all profiles)."
 
-# Optional: block inbound by default is usually already true, but we set it
-netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound | Out-Null
+# Block inbound and outbound by default
+netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound | Out-Null
 Write-Host "[OK] Firewall policy set: block inbound / allow outbound."
 
 # --- Allow FTP control + passive ports (TCP) ---
@@ -103,6 +103,28 @@ $passiveStart, $passiveEnd = $PassivePortRange.Split("-")
 New-NetFirewallRule -DisplayName "CCDC-FTP-Control" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $FtpControlPort -Profile Any | Out-Null
 New-NetFirewallRule -DisplayName "CCDC-FTP-Passive" -Direction Inbound -Action Allow -Protocol TCP -LocalPort "$passiveStart-$passiveEnd" -Profile Any | Out-Null
 Write-Host "[OK] Firewall allows FTP control ($FtpControlPort) + passive ($PassivePortRange)."
+
+# --- Allow outbound ports for basic functionality ---
+New-NetFirewallRule -DisplayName "CCDC-DNS-TCP" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 53 -Profile Any | Out-Null
+New-NetFirewallRule -DisplayName "CCDC-DNS-UDP" -Direction Outbound -Action Allow -Protocol UDP -RemotePort 53 -Profile Any | Out-Null
+New-NetFirewallRule -DisplayName "CCDC-HTTP-HTTPS" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 80,443 -Profile Any | Out-Null
+
+# --- Allow outbound for domain ports ---
+New-NetFirewallRule -DisplayName "CCDC-Kerberos-TCP" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 88,464 -Profile Any | Out-Null
+New-NetFirewallRule -DisplayName "CCDC-Kerberos-UDP" -Direction Outbound -Action Allow -Protocol UDP -RemotePort 88,464 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-LDAP-LDAPS-TCP" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 389,636 -Profile Any | Out-Null
+New-NetFirewallRule -DisplayName "CCDC-LDAP-UDP" -Direction Outbound -Action Allow -Protocol UDP -RemotePort 389 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-GC" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 3268,3269 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-SMB" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 445 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-RPC" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 135,49152-65535 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-NTP" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 123 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-ICMP" -Direction Outbound -Action Allow -Protocol ICMPv4 -Profile Any | Out-Null
 
 # --- Management: lock RDP to admin CIDRs (or disable) ---
 if ($AllowRdp) {
