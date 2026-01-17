@@ -1,13 +1,11 @@
 #Requires -RunAsAdministrator
 # AD-DNS-Hardening.ps1 (fixed)
-# CCDC hardening for DC + DNS, non-destructive defaults, best-effort removals.
+# CCDC hardening for DNS + host services, non-destructive defaults, best-effort removals.
 
 $ErrorActionPreference = "Stop"
 
 # ---- EDIT ME ----
 $TrustedNtpServer = "time.windows.com"
-$DisableDFS       = $true          # set $false if DFS is required
-$DisableADLDS     = $true          # best-effort remove if installed
 $DisableSpooler   = $true
 $DisableWinRM     = $true
 $DisableSMBv1     = $true
@@ -47,19 +45,7 @@ function Set-RegDword($path, $name, $value) {
 }
 
 
-function Try-DisableFeature($name) {
-  $f = Get-WindowsFeature -Name $name -ErrorAction SilentlyContinue
-  if ($f -and $f.Installed) {
-    Remove-WindowsFeature -Name $name -IncludeManagementTools -Restart:$false | Out-Null
-    Write-Host "[OK] Removed WindowsFeature: $name"
-  } elseif ($f) {
-    Write-Host "[..] Feature not installed: $name"
-  } else {
-    Write-Host "[..] Feature unknown on this host: $name"
-  }
-}
-
-Write-Host "=== AD + DNS Hardening (CCDC) ==="
+Write-Host "=== DNS + Host Hardening (CCDC) ==="
 
 # --- Kill obvious lateral-move services ---
 if ($DisableSpooler) { Disable-ServiceSafe "Spooler" }
@@ -69,21 +55,6 @@ Disable-ServiceSafe "BluetoothSupportService"
 Disable-ServiceSafe "WerSvc"
 
 if ($DisableWinRM) { Disable-ServiceSafe "WinRM" }
-
-# --- Optional role cleanup (best-effort) ---
-if ($DisableADLDS) {
-  # AD LDS role on Server is "ADLDS"
-  Try-DisableFeature "ADLDS"
-  # Also remove RSAT AD LDS tools if present
-  Try-DisableFeature "RSAT-ADLDS"
-}
-
-if ($DisableDFS) {
-  Disable-ServiceSafe "DFSR"
-  # If DFS Namespaces/Replication roles were installed, remove them best-effort:
-  Try-DisableFeature "FS-DFS-Namespace"
-  Try-DisableFeature "FS-DFS-Replication"
-}
 
 # --- SMBv1 OFF ---
 if ($DisableSMBv1) {
@@ -113,27 +84,6 @@ try {
 }
 
 
-
-# --- NTLM hardening ---
-Set-RegDword "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" "LmCompatibilityLevel" 5
-Set-RegDword "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest" "UseLogonCredential" 0
-Write-Host "[OK] NTLMv2 enforced, WDigest disabled."
-
-# --- PowerShell logging ---
-Set-RegDword "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" "EnableScriptBlockLogging" 1
-Set-RegDword "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" "EnableModuleLogging" 1
-New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames" -Force | Out-Null
-New-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames" -Name "*" -PropertyType String -Value "*" -Force | Out-Null
-Write-Host "[OK] PowerShell logging enabled."
-
-# --- Advanced auditing ---
-auditpol /set /category:"Logon/Logoff" /success:enable /failure:enable | Out-Null
-auditpol /set /category:"Account Logon" /success:enable /failure:enable | Out-Null
-auditpol /set /category:"Account Management" /success:enable /failure:enable | Out-Null
-auditpol /set /category:"Policy Change" /success:enable /failure:enable | Out-Null
-auditpol /set /subcategory:"Process Creation" /success:enable /failure:disable | Out-Null
-Write-Host "[OK] Advanced audit policy enabled."
-
 # --- DNS hardening ---
 try {
   Import-Module DNSServer -ErrorAction Stop
@@ -145,11 +95,6 @@ try {
     } catch {}
   }
 
-  # Secure dynamic updates for AD-integrated zones
-  Get-DnsServerZone | Where-Object { $_.IsDsIntegrated } | ForEach-Object {
-    Set-DnsServerPrimaryZone -Name $_.ZoneName -DynamicUpdate Secure -ErrorAction SilentlyContinue
-  }
-
   if ($DisableDnsRecursion) {
     Set-DnsServerRecursion -Enable $false -ErrorAction SilentlyContinue
     Write-Host "[OK] DNS recursion disabled."
@@ -157,7 +102,7 @@ try {
     Write-Host "[..] DNS recursion unchanged."
   }
 
-  Write-Host "[OK] DNS: zone transfers off + secure dynamic updates (AD zones)."
+  Write-Host "[OK] DNS: zone transfers off."
 } catch {
   Write-Host "[..] DNS module not available or partial DNS hardening skipped."
 }
@@ -258,18 +203,6 @@ try {
   Write-Host "LLMNR disabled (EnableMulticast=0)    " ($llmnr.EnableMulticast -eq 0)
 } catch {
   Write-Host "LLMNR disabled (EnableMulticast=0)    FAIL   EnableMulticast="
-}
-try {
-  $sbl = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging" -ErrorAction Stop
-  Write-Host "PowerShell ScriptBlockLogging enabled " ($sbl.EnableScriptBlockLogging -eq 1)
-} catch {
-  Write-Host "PowerShell ScriptBlockLogging enabled FAIL   EnableScriptBlockLogging="
-}
-try {
-  $ml = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" -Name "EnableModuleLogging" -ErrorAction Stop
-  Write-Host "PowerShell ModuleLogging enabled      " ($ml.EnableModuleLogging -eq 1)
-} catch {
-  Write-Host "PowerShell ModuleLogging enabled      FAIL   EnableModuleLogging="
 }
 try {
   Import-Module DNSServer -ErrorAction Stop
