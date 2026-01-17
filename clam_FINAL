@@ -19,11 +19,34 @@ function Is-Admin {
 }
 
 function Download-File($Url, $OutFile) {
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   New-Item -ItemType Directory -Force -Path (Split-Path $OutFile) | Out-Null
-  Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
-}
 
+  try {
+    # BITS suele funcionar mejor con trust del sistema
+    Start-BitsTransfer -Source $Url -Destination $OutFile -ErrorAction Stop
+    return
+  } catch {}
+
+  try {
+    # Fallback a curl (Windows built-in)
+    $curl = (Get-Command curl.exe -ErrorAction Stop).Source
+    & $curl -L --retry 3 --retry-delay 2 -o $OutFile $Url
+    if ($LASTEXITCODE -ne 0) { throw "curl failed ($LASTEXITCODE)" }
+    return
+  } catch {}
+
+  # Último intento: forzar TLS 1.2 en .NET (a veces ayuda)
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = `
+      [Net.SecurityProtocolType]::Tls12 -bor `
+      [Net.SecurityProtocolType]::Tls11 -bor `
+      [Net.SecurityProtocolType]::Tls
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+    return
+  } catch {
+    throw "Download failed for $Url -> $($_.Exception.Message)"
+  }
+}
 function Find-Exe($name, $roots) {
   foreach ($r in $roots) {
     if (Test-Path $r) {
