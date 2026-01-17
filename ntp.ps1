@@ -28,7 +28,7 @@ Restart-Service w32time
 Write-Host "Done"
 
 Write-Host "Resyncing..."
-w32tm /resync /rediscover
+w32tm /resync /rediscover /force
 Write-Host "Done"
 
 Write-Host "w32tm setup completed."
