@@ -1,76 +1,66 @@
-# setup-iis-https-only.ps1
-# MAIN site: HTTPS only on 443 (serves C:\inetpub\wwwroot\wwwroot)
-# Redirector site: HTTP 80 -> redirects to https://... (does NOT serve content)
-# Stops Default Web Site, opens firewall 80/443
+# setup-iis-http+https-same.ps1
+# SAME content on HTTP:80 and HTTPS:443. No redirect.
+# Removes 80/443 bindings from any other IIS sites (no name assumptions).
 
 $ErrorActionPreference = "Stop"
 
-$MainSite  = "wwwroot"
-$MainPath  = "C:\inetpub\wwwroot\wwwroot"
-$DnsName   = "localhost"   # cert CN
-$HttpsPort = 443
+$SiteName  = "wwwroot"
+$SitePath  = "C:\inetpub\wwwroot\wwwroot"
+$DnsName   = "localhost"
 $HttpPort  = 80
-
-$RedirSite = "redirect-80"
-$RedirPath = "C:\inetpub\redirect-80"
+$HttpsPort = 443
 
 Import-Module ServerManager
 Add-WindowsFeature `
-  Web-Server,Web-WebServer,Web-Common-Http,Web-Static-Content,Web-Default-Doc,Web-Http-Errors, `
-  Web-Http-Redirect,Web-Mgmt-Tools | Out-Null
+  Web-Server,Web-WebServer,Web-Common-Http,Web-Static-Content,Web-Default-Doc,Web-Http-Errors,Web-Mgmt-Tools | Out-Null
 Import-Module WebAdministration
 
-if (-not (Test-Path "$MainPath\index.html")) { throw "Missing $MainPath\index.html" }
+if (-not (Test-Path "$SitePath\index.html")) { throw "Missing $SitePath\index.html" }
 
-# avoid conflicts
-Stop-Website "Default Web Site" -ErrorAction SilentlyContinue
+# Remove existing site if present
+if (Test-Path "IIS:\Sites\$SiteName") { Remove-Website $SiteName }
 
-# remove existing
-if (Test-Path "IIS:\Sites\$MainSite")  { Remove-Website $MainSite }
-if (Test-Path "IIS:\Sites\$RedirSite") { Remove-Website $RedirSite }
+# App pool (static)
+if (-not (Test-Path "IIS:\AppPools\$SiteName")) { New-WebAppPool $SiteName | Out-Null }
+Set-ItemProperty "IIS:\AppPools\$SiteName" -Name managedRuntimeVersion -Value ""
 
-# app pools
-if (-not (Test-Path "IIS:\AppPools\$MainSite"))  { New-WebAppPool $MainSite  | Out-Null }
-if (-not (Test-Path "IIS:\AppPools\$RedirSite")) { New-WebAppPool $RedirSite | Out-Null }
-Set-ItemProperty "IIS:\AppPools\$MainSite"  -Name managedRuntimeVersion -Value ""
-Set-ItemProperty "IIS:\AppPools\$RedirSite" -Name managedRuntimeVersion -Value ""
+# Create site on HTTP 80
+New-Website -Name $SiteName -PhysicalPath $SitePath -Port $HttpPort -ApplicationPool $SiteName | Out-Null
 
-# MAIN HTTPS site (no HTTP binding)
-New-Website -Name $MainSite -PhysicalPath $MainPath -Port 12345 -ApplicationPool $MainSite | Out-Null
-Get-WebBinding -Name $MainSite -Protocol http -ErrorAction SilentlyContinue | Remove-WebBinding
-New-WebBinding -Name $MainSite -Protocol https -Port $HttpsPort | Out-Null
+# Add HTTPS 443 binding
+New-WebBinding -Name $SiteName -Protocol https -Port $HttpsPort | Out-Null
 
-# cert + ssl bind
-$cert = Get-ChildItem Cert:\LocalMachine\My | ? {$_.Subject -eq "CN=$DnsName"} | sort NotAfter -desc | select -first 1
+# Self-signed cert + bind to 0.0.0.0:443
+$cert = Get-ChildItem Cert:\LocalMachine\My | ? { $_.Subject -eq "CN=$DnsName" } | sort NotAfter -desc | select -first 1
 if (-not $cert) { $cert = New-SelfSignedCertificate -DnsName $DnsName -CertStoreLocation "Cert:\LocalMachine\My" }
+
 if (Test-Path "IIS:\SslBindings\0.0.0.0!$HttpsPort") { Remove-Item "IIS:\SslBindings\0.0.0.0!$HttpsPort" -Force }
 New-Item "IIS:\SslBindings\0.0.0.0!$HttpsPort" -Thumbprint $cert.Thumbprint | Out-Null
 
-# Redirector on 80
-New-Item -ItemType Directory -Force -Path $RedirPath | Out-Null
-Set-Content -Path (Join-Path $RedirPath "index.html") -Value "redirecting..." -Encoding ascii
-New-Website -Name $RedirSite -PhysicalPath $RedirPath -Port $HttpPort -ApplicationPool $RedirSite | Out-Null
+# Remove 80/443 bindings from any other sites
+Get-Website | ForEach-Object {
+  $name = $_.Name
+  if ($name -ne $SiteName) {
+    Get-WebBinding -Name $name -Protocol http -ErrorAction SilentlyContinue |
+      Where-Object { $_.bindingInformation -like "*:${HttpPort}:*" } |
+      Remove-WebBinding -ErrorAction SilentlyContinue
 
-Set-WebConfigurationProperty -PSPath "IIS:\Sites\$RedirSite" `
-  -Filter "system.webServer/httpRedirect" -Name "enabled" -Value "True"
-Set-WebConfigurationProperty -PSPath "IIS:\Sites\$RedirSite" `
-  -Filter "system.webServer/httpRedirect" -Name "destination" -Value "https://{HTTP_HOST}{PATH_INFO}"
-Set-WebConfigurationProperty -PSPath "IIS:\Sites\$RedirSite" `
-  -Filter "system.webServer/httpRedirect" -Name "appendQueryString" -Value "True"
-Set-WebConfigurationProperty -PSPath "IIS:\Sites\$RedirSite" `
-  -Filter "system.webServer/httpRedirect" -Name "httpResponseStatus" -Value "Permanent"
+    Get-WebBinding -Name $name -Protocol https -ErrorAction SilentlyContinue |
+      Where-Object { $_.bindingInformation -like "*:${HttpsPort}:*" } |
+      Remove-WebBinding -ErrorAction SilentlyContinue
+  }
+}
 
-# firewall
-$rule80  = "IIS-$MainSite-REDIRECT-80"
-$rule443 = "IIS-$MainSite-HTTPS-443"
+# Firewall 80/443
+$rule80  = "IIS-$SiteName-HTTP-$HttpPort"
+$rule443 = "IIS-$SiteName-HTTPS-$HttpsPort"
 Get-NetFirewallRule -DisplayName $rule80  -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 Get-NetFirewallRule -DisplayName $rule443 -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName $rule80  -Direction Inbound -Action Allow -Protocol TCP -LocalPort $HttpPort  | Out-Null
 New-NetFirewallRule -DisplayName $rule443 -Direction Inbound -Action Allow -Protocol TCP -LocalPort $HttpsPort | Out-Null
 
 iisreset | Out-Null
-Start-Website $MainSite
-Start-Website $RedirSite
+Start-Website $SiteName
 
 Write-Host "[+] Done."
 Get-Website | ft name,state,bindings,physicalPath -Auto
