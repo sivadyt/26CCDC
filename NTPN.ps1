@@ -42,7 +42,7 @@ do {
   } 
 } until ($input -eq "0" -or $input -eq "1" -or $input -eq "2" -or $input -eq "3")
 
-Write-Host "Restarting service..."
+Write-Host "`nRestarting service..."
 Restart-Service w32time
 Write-Host "Done`n"
 
