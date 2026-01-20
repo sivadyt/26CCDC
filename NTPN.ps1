@@ -7,6 +7,10 @@ function Menu {
   Write-Host "===============================================`n"
 }
 
+function MenuSelection {
+  
+}
+
 Write-Host "Configuring w32time...`n"
 
 do {
@@ -40,7 +44,9 @@ do {
       w32tm /config /manualpeerlist:"0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org" /syncfromflags:MANUAL /reliable:YES /update
       Write-Host "`nDone`n"
       
-    } until ($input -eq "0" -or $input -eq "1" -or $input -eq "2" -or $input -eq "3")
+    } 
+  } 
+} until ($input -eq "0" -or $input -eq "1" -or $input -eq "2" -or $input -eq "3")
 
 Write-Host "Restarting service..."
 Restart-Service w32time
