@@ -1,5 +1,5 @@
-#Requires -RunAsAdministrator
-# FTP-Server-Hardening.ps1 (CCDC)
+# Requires -RunAsAdministrator
+# FTP Server Hardening (CCDC)
 # Defensive hardening: base OS + firewall + logging + (optional) IIS/FTP knobs
 # Safe defaults: only touches common risky services + policies.
 # Adjust: $FtpControlPort, $PassivePortRange, $AdminMgmtCIDRs
