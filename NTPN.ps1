@@ -30,7 +30,7 @@ do {
     }
     # Enter new host
     "2" {
-      $newhost = Read-Host -Prompt "Enter newhost IP: "
+      $newhost = Read-Host -Prompt "Enter newhost IP"
       w32tm /config /manualpeerlist:"$newhost" /update
       Write-Host "Done."
     }
