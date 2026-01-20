@@ -130,7 +130,10 @@ New-NetFirewallRule -DisplayName "CCDC-NTP" -Direction Outbound -Action Allow -P
 
 New-NetFirewallRule -DisplayName "CCDC-ICMP" -Direction Outbound -Action Allow -Protocol ICMPv4 -Profile Any | Out-Null
 
-New-NetFirewallRule -DisplayName "CCDC-Wazuh" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 1514,1515 -Profile Any | Out-Null
+# --- Allow ports for logging ---
+
+New-NetFirewallRule -DisplayName "CCDC-Wazuh-Outbound" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 1514,1515 -Profile Any | Out-Null
+New-NetFirewallRule -DisplayName "CCDC-Wazuh-Inbound" -Direction Inbound -Action Allow -Protocol TCP -RemotePort 1514,1515 -Profile Any | Out-Null
 
 New-NetFirewallRule -DisplayName "CCDC-Splunk" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 8089-9997 -Profile Any | Out-Null
 
