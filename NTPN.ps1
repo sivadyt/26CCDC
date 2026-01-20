@@ -20,8 +20,8 @@ do {
       Write-Host "Done."
     }
     "2" {
-      $host = Read-Host -Prompt "Enter newhost IP: "
-      w32tm /config /manualpeerlist:"$host" /update
+      $newhost = Read-Host -Prompt "Enter newhost IP: "
+      w32tm /config /manualpeerlist:"$newhost" /update
       Write-Host "Done."
     }
     "3" {
@@ -29,27 +29,27 @@ do {
       Write-Host "Setting registery values:`n"
       Write-Host "Enabling NTP Server hosting..."
       Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpServer" -Name "Enabled" -Value 1
-      Write-Host "`nDone`n"
+      Write-Host "Done`n"
 
       Write-Host "Setting announce flags..."
       Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters" -Name "AnnounceFlags" -Value 5
-      Write-Host "`nDone`n"
+      Write-Host "Done`n"
 
       Write-Host "Setting peerlist..."
       w32tm /config /manualpeerlist:"0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org" /syncfromflags:MANUAL /reliable:YES /update
-      Write-Host "`nDone`n"
+      Write-Host "Done`n"
     } 
   } 
 } until ($input -eq "0" -or $input -eq "1" -or $input -eq "2" -or $input -eq "3")
 
 Write-Host "Restarting service..."
 Restart-Service w32time
-Write-Host "`nDone`n"
+Write-Host "Done`n"
 
 Write-Host "Resyncing..."
 w32tm /resync /rediscover
 w32tm /resync /force
-Write-Host "`nDone`n"
+Write-Host "Done`n"
 
 Write-Host "w32tm setup completed."
 Read-Host "Press enter to exit..."
