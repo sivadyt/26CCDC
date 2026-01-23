@@ -82,3 +82,46 @@ Write-Host "Running freshclam..."
 Write-Host ""
 & $clamscan --version
 Get-ChildItem $DB_DIR
+
+
+
+
+# --- Create Scheduled Task: Hourly ClamAV Scan ---
+
+$taskName = "ClamAV Hourly Scan"
+
+# Remove existing task if present
+if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
+
+$action = New-ScheduledTaskAction `
+  -Execute "$INSTALL_DIR\clamscan.exe" `
+  -Argument "C:\ --recursive --infected --log=$INSTALL_DIR\logs\hourly-scan.log"
+
+$trigger = New-ScheduledTaskTrigger `
+  -Once `
+  -At (Get-Date).AddHours(1) `
+  -RepetitionInterval (New-TimeSpan -Minutes 60) `
+  -RepetitionDuration ([TimeSpan]::MaxValue)
+
+$principal = New-ScheduledTaskPrincipal `
+  -UserId "SYSTEM" `
+  -LogonType ServiceAccount `
+  -RunLevel Highest
+
+# Ensure log dir
+New-Item -ItemType Directory -Force -Path "$INSTALL_DIR\logs" | Out-Null
+
+Register-ScheduledTask `
+  -TaskName $taskName `
+  -Action $action `
+  -Trigger $trigger `
+  -Principal $principal `
+  -Description "Runs an hourly ClamAV scan of C: drive."
+
+Write-Host "Scheduled task '$taskName' created."
+
+
+
+
