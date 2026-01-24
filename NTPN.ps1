@@ -8,7 +8,7 @@ function Menu {
   Write-Host "====== Select an option for NTP hosting: ======"
   Write-Host "0 - Cancel"
   Write-Host "1 - Use default newhost (Ecom: 172.20.242.104)"
-  Write-Host "2 - Enter newhost IP"
+  Write-Host "2 - Enter newhost IP || NTP Pool"
   Write-Host "3 - Host on this machine"
   Write-Host "===============================================`n"
 }
@@ -70,4 +70,8 @@ if ($input -eq "0") {
 
   Write-Host "w32tm setup completed."
 }
-Read-Host "Press enter to exit..."
+
+Write-Host "Printing NTP peers...`n"
+w32tm /query /peers
+
+Read-Host "`nPress enter to exit..."
