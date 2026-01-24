@@ -102,8 +102,7 @@ $action = New-ScheduledTaskAction `
 $trigger = New-ScheduledTaskTrigger `
   -Once `
   -At (Get-Date).AddHours(1) `
-  -RepetitionInterval (New-TimeSpan -Minutes 60) `
-  -RepetitionDuration ([TimeSpan]::MaxValue)
+  -RepetitionInterval (New-TimeSpan -Minutes 60)
 
 $principal = New-ScheduledTaskPrincipal `
   -UserId "SYSTEM" `
@@ -121,8 +120,6 @@ Register-ScheduledTask `
   -Description "Runs an hourly ClamAV scan of C: drive."
 
 Write-Host "Scheduled task '$taskName' created."
-
-
 
 # --- Paths ---
 $INSTALL_DIR = "C:\Program Files\ClamAV"
