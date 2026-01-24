@@ -125,6 +125,13 @@ function Ensure-DomainAdminUser {
     Try-Ignore { Add-ADGroupMember -Identity "Domain Admins" -Members $Username }
 }
 
+# --- Allow ports for logging ---
+
+New-NetFirewallRule -DisplayName "CCDC-Wazuh-Outbound" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 1514,1515 -Profile Any | Out-Null
+New-NetFirewallRule -DisplayName "CCDC-Wazuh-Inbound" -Direction Inbound -Action Allow -Protocol TCP -RemotePort 1514,1515 -Profile Any | Out-Null
+
+New-NetFirewallRule -DisplayName "CCDC-Splunk" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 8089-9997 -Profile Any | Out-Null
+
 # --- Firewall (Inbound only)
 function Set-InboundFirewallLockdown {
     param([int[]]$AllowTcpPorts, [int[]]$AllowUdpPorts)
