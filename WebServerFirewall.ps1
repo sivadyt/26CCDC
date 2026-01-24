@@ -1,8 +1,7 @@
 <# 
 Web Server Firewall Baseline (Windows Server 2019)
-- Inbound: allow only HTTP/HTTPS (80/443)
-- Outbound: Default BLOCK; allows DNS/NTP + web (80/443) + optional internal service ports you choose
-- Explicitly blocks RDP and SSH
+Inbound: allow only HTTP/HTTPS (80/443), block RDP/SSH
+Outbound: Default BLOCK; allow DNS/NTP + 80/443 + optional internal service ports
 Run as Administrator.
 #>
 
@@ -47,33 +46,26 @@ Write-Host "Inbound: ONLY TCP 80/443 allowed. Everything else blocked."
 Write-Host "Outbound: Default BLOCK; allows DNS/NTP + TCP 80/443 + your internal service ports."
 Write-Host ""
 
-# Inputs
 $dnsServers = Read-Host "Enter DNS server IPs (comma-separated) (example: 172.20.240.202,8.8.8.8)"
 $ntpServers = Read-Host "Enter NTP server IPs (comma-separated) (example: 172.20.240.202) (blank = allow any NTP)"
+$internalSubnets = Read-Host "Enter internal subnet(s) CIDR (example: 172.20.240.0/24,10.0.0.0/8)"
 
-$internalSubnets = Read-Host "Enter internal subnet(s) the web server must talk to (comma-separated CIDR) (example: 172.20.240.0/24,10.0.0.0/8)"
-if ([string]::IsNullOrWhiteSpace($internalSubnets)) {
-  Write-Host "No internal subnets entered. Internal outbound rules will be limited to IPs you specify later (or skipped)." -ForegroundColor Yellow
-}
-
-$tcpInternalPorts = Read-PortsList "Enter INTERNAL TCP ports the web server must reach (example: 1433 389 636) or blank"
-$udpInternalPorts = Read-PortsList "Enter INTERNAL UDP ports the web server must reach (example: 514 123) or blank"
+$tcpInternalPorts = Read-PortsList "Enter INTERNAL TCP ports to reach (example: 1433 389 636) or blank"
+$udpInternalPorts = Read-PortsList "Enter INTERNAL UDP ports to reach (example: 514 123) or blank"
 
 $dnsList    = Split-Addr $dnsServers
 $ntpList    = Split-Addr $ntpServers
 $subnetList = Split-Addr $internalSubnets
 
-# --- Apply policy ---
 Write-Host ""
 Write-Host "Applying firewall policy..." -ForegroundColor Cyan
 
-# Strong defaults
+# ✅ FIX: removed -NotifyOnListen to avoid GpoBoolean conversion issues
 Set-NetFirewallProfile -Profile Domain,Private,Public `
   -DefaultInboundAction Block `
-  -DefaultOutboundAction Block `
-  -NotifyOnListen $true | Out-Null
+  -DefaultOutboundAction Block | Out-Null
 
-# Logging (optional but helpful)
+# Logging (helpful for seeing blocks)
 $logPath = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
 Set-NetFirewallProfile -Profile Domain,Private,Public `
   -LogFileName $logPath `
@@ -81,19 +73,17 @@ Set-NetFirewallProfile -Profile Domain,Private,Public `
   -LogBlocked $true `
   -LogAllowed $true | Out-Null
 
-# Remove old rules we created before
+# Remove our old rules
 Get-NetFirewallRule -ErrorAction SilentlyContinue |
   Where-Object { $_.Group -eq "CCDC-WebServer" } |
   Remove-NetFirewallRule -ErrorAction SilentlyContinue | Out-Null
 
-# Disable built-in RDP rule group if present
+# Disable built-in RDP rules if present
 Ensure-RuleGroupOff "Remote Desktop"
 
 # ---- INBOUND ----
 New-NetFirewallRule -DisplayName "WS IN Allow HTTP 80"  -Group "CCDC-WebServer" -Direction Inbound  -Action Allow -Protocol TCP -LocalPort 80  -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS IN Allow HTTPS 443" -Group "CCDC-WebServer" -Direction Inbound  -Action Allow -Protocol TCP -LocalPort 443 -Profile Domain,Private,Public | Out-Null
-
-# Explicitly block RDP/SSH inbound
 New-NetFirewallRule -DisplayName "WS IN Block RDP 3389" -Group "CCDC-WebServer" -Direction Inbound -Action Block -Protocol TCP -LocalPort 3389 -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS IN Block SSH 22"   -Group "CCDC-WebServer" -Direction Inbound -Action Block -Protocol TCP -LocalPort 22   -Profile Domain,Private,Public | Out-Null
 
@@ -114,11 +104,11 @@ if ($ntpList.Count -gt 0) {
   New-NetFirewallRule -DisplayName "WS OUT Allow NTP UDP 123 (any)" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol UDP -RemotePort 123 -Profile Domain,Private,Public | Out-Null
 }
 
-# Outbound web (updates, cert checks, downloads)
+# Outbound web
 New-NetFirewallRule -DisplayName "WS OUT Allow HTTP 80"  -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 80  -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS OUT Allow HTTPS 443" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 443 -Profile Domain,Private,Public | Out-Null
 
-# Internal service ports (scoped to your internal subnets)
+# Internal services (scoped to internal subnets)
 if ($subnetList.Count -gt 0) {
   if ($tcpInternalPorts.Count -gt 0) {
     New-NetFirewallRule -DisplayName "WS OUT Allow INTERNAL TCP ports" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort ($tcpInternalPorts -join ",") -RemoteAddress $subnetList -Profile Domain,Private,Public | Out-Null
@@ -127,16 +117,15 @@ if ($subnetList.Count -gt 0) {
     New-NetFirewallRule -DisplayName "WS OUT Allow INTERNAL UDP ports" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol UDP -RemotePort ($udpInternalPorts -join ",") -RemoteAddress $subnetList -Profile Domain,Private,Public | Out-Null
   }
 } else {
-  Write-Host "Skipped internal outbound rules because no internal subnet(s) were provided." -ForegroundColor Yellow
+  Write-Host "No internal subnet(s) provided, skipping internal outbound allow rules." -ForegroundColor Yellow
 }
 
-# Reduce lateral movement: block SMB outbound
+# Block SMB outbound (hardening)
 New-NetFirewallRule -DisplayName "WS OUT Block SMB TCP 445" -Group "CCDC-WebServer" -Direction Outbound -Action Block -Protocol TCP -RemotePort 445 -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS OUT Block SMB TCP 139" -Group "CCDC-WebServer" -Direction Outbound -Action Block -Protocol TCP -RemotePort 139 -Profile Domain,Private,Public | Out-Null
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
 Write-Host "Firewall log: $logPath"
-Write-Host ""
 Write-Host "Show rules:"
 Write-Host "  Get-NetFirewallRule -Group 'CCDC-WebServer' | ft DisplayName,Enabled,Direction,Action -Auto"
