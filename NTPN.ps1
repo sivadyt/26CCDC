@@ -7,9 +7,10 @@ $input = "0"
 function Menu {
   Write-Host "====== Select an option for NTP hosting: ======"
   Write-Host "0 - Cancel"
-  Write-Host "1 - Use default newhost (Ecom: 172.20.242.104)"
-  Write-Host "2 - Enter newhost IP || NTP Pool"
-  Write-Host "3 - Host on this machine"
+  Write-Host "1 - Use default Newhost (Ecom: 172.20.242.104)"
+  Write-Host "2 - Use default Public-Pools (pool.ntp.org)"
+  Write-Host "3 - Enter newhost IP or Public-Pool"
+  Write-Host "4 - Host on this machine"
   Write-Host "===============================================`n"
 }
 
@@ -36,6 +37,11 @@ do {
     }
     # Host on this machine
     "3" {
+      $newhost = Read-Host -Prompt "Enter newhost IP"
+      w32tm /config /manualpeerlist:"$publicpool" /update
+      Write-Host "Done."
+    } 
+    "4" {
       Write-Host "Hosting NTP Server with w32tm...`n"
       Write-Host "Setting registery values:"
       Write-Host "Enabling NTP Server hosting..."
@@ -51,7 +57,7 @@ do {
       Write-Host "Setting peerlist..."
       w32tm /config /manualpeerlist:"$publicPool" /syncfromflags:MANUAL /reliable:YES /update
       Write-Host "Done"
-    } 
+    }     
   } 
 } until ($input -eq "0" -or $input -eq "1" -or $input -eq "2" -or $input -eq "3")
 
