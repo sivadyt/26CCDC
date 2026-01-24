@@ -1,7 +1,8 @@
 <# 
-Web Server Firewall Baseline (Windows Server 2019)
+Web Server Firewall Baseline (Windows Server 2019) - Compatible Build
 Inbound: allow only HTTP/HTTPS (80/443), block RDP/SSH
 Outbound: Default BLOCK; allow DNS/NTP + 80/443 + optional internal service ports
+Logging: configured via netsh (avoids GpoBoolean conversion errors)
 Run as Administrator.
 #>
 
@@ -46,9 +47,9 @@ Write-Host "Inbound: ONLY TCP 80/443 allowed. Everything else blocked."
 Write-Host "Outbound: Default BLOCK; allows DNS/NTP + TCP 80/443 + your internal service ports."
 Write-Host ""
 
-$dnsServers = Read-Host "Enter DNS server IPs (comma-separated) (example: 172.20.240.202,8.8.8.8)"
-$ntpServers = Read-Host "Enter NTP server IPs (comma-separated) (example: 172.20.240.202) (blank = allow any NTP)"
-$internalSubnets = Read-Host "Enter internal subnet(s) CIDR (example: 172.20.240.0/24,10.0.0.0/8)"
+$dnsServers     = Read-Host "Enter DNS server IPs (comma-separated) (example: 172.20.240.202,8.8.8.8)"
+$ntpServers     = Read-Host "Enter NTP server IPs (comma-separated) (blank = allow any NTP)"
+$internalSubnets= Read-Host "Enter internal subnet(s) CIDR (comma-separated) (example: 172.20.240.0/24,10.0.0.0/8)"
 
 $tcpInternalPorts = Read-PortsList "Enter INTERNAL TCP ports to reach (example: 1433 389 636) or blank"
 $udpInternalPorts = Read-PortsList "Enter INTERNAL UDP ports to reach (example: 514 123) or blank"
@@ -60,35 +61,36 @@ $subnetList = Split-Addr $internalSubnets
 Write-Host ""
 Write-Host "Applying firewall policy..." -ForegroundColor Cyan
 
-# ✅ FIX: removed -NotifyOnListen to avoid GpoBoolean conversion issues
+# Defaults (no NotifyOnListen, no LogBlocked/LogAllowed here)
 Set-NetFirewallProfile -Profile Domain,Private,Public `
   -DefaultInboundAction Block `
   -DefaultOutboundAction Block | Out-Null
 
-# Logging (helpful for seeing blocks)
+# Configure logging via netsh (works reliably)
 $logPath = "$env:SystemRoot\System32\LogFiles\Firewall\pfirewall.log"
-Set-NetFirewallProfile -Profile Domain,Private,Public `
-  -LogFileName $logPath `
-  -LogMaxSizeKilobytes 16384 `
-  -LogBlocked $true `
-  -LogAllowed $true | Out-Null
+& netsh advfirewall set allprofiles logging filename "`"$logPath`"" | Out-Null
+& netsh advfirewall set allprofiles logging maxfilesize 16384 | Out-Null
+& netsh advfirewall set allprofiles logging droppedconnections enable | Out-Null
+& netsh advfirewall set allprofiles logging allowedconnections enable | Out-Null
 
-# Remove our old rules
+# Remove old rules we created before
 Get-NetFirewallRule -ErrorAction SilentlyContinue |
   Where-Object { $_.Group -eq "CCDC-WebServer" } |
   Remove-NetFirewallRule -ErrorAction SilentlyContinue | Out-Null
 
-# Disable built-in RDP rules if present
+# Disable built-in RDP rules (if present)
 Ensure-RuleGroupOff "Remote Desktop"
 
 # ---- INBOUND ----
-New-NetFirewallRule -DisplayName "WS IN Allow HTTP 80"  -Group "CCDC-WebServer" -Direction Inbound  -Action Allow -Protocol TCP -LocalPort 80  -Profile Domain,Private,Public | Out-Null
+New-NetFirewallRule -DisplayName "WS IN Allow HTTP 80"   -Group "CCDC-WebServer" -Direction Inbound  -Action Allow -Protocol TCP -LocalPort 80  -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS IN Allow HTTPS 443" -Group "CCDC-WebServer" -Direction Inbound  -Action Allow -Protocol TCP -LocalPort 443 -Profile Domain,Private,Public | Out-Null
-New-NetFirewallRule -DisplayName "WS IN Block RDP 3389" -Group "CCDC-WebServer" -Direction Inbound -Action Block -Protocol TCP -LocalPort 3389 -Profile Domain,Private,Public | Out-Null
-New-NetFirewallRule -DisplayName "WS IN Block SSH 22"   -Group "CCDC-WebServer" -Direction Inbound -Action Block -Protocol TCP -LocalPort 22   -Profile Domain,Private,Public | Out-Null
+
+# Explicit blocks
+New-NetFirewallRule -DisplayName "WS IN Block RDP 3389"  -Group "CCDC-WebServer" -Direction Inbound -Action Block -Protocol TCP -LocalPort 3389 -Profile Domain,Private,Public | Out-Null
+New-NetFirewallRule -DisplayName "WS IN Block SSH 22"    -Group "CCDC-WebServer" -Direction Inbound -Action Block -Protocol TCP -LocalPort 22   -Profile Domain,Private,Public | Out-Null
 
 # ---- OUTBOUND ----
-# DNS
+# DNS outbound (to your DNS servers if provided)
 if ($dnsList.Count -gt 0) {
   New-NetFirewallRule -DisplayName "WS OUT Allow DNS UDP 53 to DNS servers" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol UDP -RemotePort 53 -RemoteAddress $dnsList -Profile Domain,Private,Public | Out-Null
   New-NetFirewallRule -DisplayName "WS OUT Allow DNS TCP 53 to DNS servers" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 53 -RemoteAddress $dnsList -Profile Domain,Private,Public | Out-Null
@@ -97,7 +99,7 @@ if ($dnsList.Count -gt 0) {
   New-NetFirewallRule -DisplayName "WS OUT Allow DNS TCP 53 (any)" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 53 -Profile Domain,Private,Public | Out-Null
 }
 
-# NTP
+# NTP outbound
 if ($ntpList.Count -gt 0) {
   New-NetFirewallRule -DisplayName "WS OUT Allow NTP UDP 123 to NTP servers" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol UDP -RemotePort 123 -RemoteAddress $ntpList -Profile Domain,Private,Public | Out-Null
 } else {
@@ -105,7 +107,7 @@ if ($ntpList.Count -gt 0) {
 }
 
 # Outbound web
-New-NetFirewallRule -DisplayName "WS OUT Allow HTTP 80"  -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 80  -Profile Domain,Private,Public | Out-Null
+New-NetFirewallRule -DisplayName "WS OUT Allow HTTP 80"   -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 80  -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS OUT Allow HTTPS 443" -Group "CCDC-WebServer" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 443 -Profile Domain,Private,Public | Out-Null
 
 # Internal services (scoped to internal subnets)
@@ -120,7 +122,7 @@ if ($subnetList.Count -gt 0) {
   Write-Host "No internal subnet(s) provided, skipping internal outbound allow rules." -ForegroundColor Yellow
 }
 
-# Block SMB outbound (hardening)
+# Hardening: block SMB outbound
 New-NetFirewallRule -DisplayName "WS OUT Block SMB TCP 445" -Group "CCDC-WebServer" -Direction Outbound -Action Block -Protocol TCP -RemotePort 445 -Profile Domain,Private,Public | Out-Null
 New-NetFirewallRule -DisplayName "WS OUT Block SMB TCP 139" -Group "CCDC-WebServer" -Direction Outbound -Action Block -Protocol TCP -RemotePort 139 -Profile Domain,Private,Public | Out-Null
 
@@ -129,3 +131,5 @@ Write-Host "Done." -ForegroundColor Green
 Write-Host "Firewall log: $logPath"
 Write-Host "Show rules:"
 Write-Host "  Get-NetFirewallRule -Group 'CCDC-WebServer' | ft DisplayName,Enabled,Direction,Action -Auto"
+Write-Host "Show default policy:"
+Write-Host "  Get-NetFirewallProfile | ft Name,DefaultInboundAction,DefaultOutboundAction"
