@@ -124,4 +124,10 @@ Write-Host "Scheduled task '$taskName' created."
 
 
 
+# --- Paths ---
+$INSTALL_DIR = "C:\Program Files\ClamAV"
+$DB_DIR      = "$INSTALL_DIR\database"
 
+# --- Certs dirs (copy/sync) ---
+$CERTS_DIR_INSTALL = "$INSTALL_DIR\certs"
+$CERTS_DIR_LEGACY  = "C:\ClamAV\certs"
