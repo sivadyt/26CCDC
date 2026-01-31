@@ -25,20 +25,20 @@ do {
     "0" { break }
     # Set default
     "1" { 
-      Write-Host "`nSetting default newhost..."
+      Write-Host "`nSetting NTP host to default newhost..."
       w32tm /config /manualpeerlist:"$defaultNewHost" /update
       Write-Host "Done."
     }
     # Enter new host
     "2" {
-      $newhost = Read-Host -Prompt "Enter newhost IP"
-      w32tm /config /manualpeerlist:"$newhost" /update
+      Write-Host "`nSetting NTP host to default public pool..."
+      w32tm /config /manualpeerlist:"$publicPool" /update
       Write-Host "Done."
     }
     # Host on this machine
     "3" {
       $newhost = Read-Host -Prompt "Enter newhost IP"
-      w32tm /config /manualpeerlist:"$publicpool" /update
+      w32tm /config /manualpeerlist:"$newhost" /update
       Write-Host "Done."
     } 
     "4" {
