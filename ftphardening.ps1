@@ -7,9 +7,6 @@
 $ErrorActionPreference = "Stop"
 
 # --- EDIT ME ---
-$FtpControlPort    = 21                 # change if you moved FTP control port
-$FtpSSLPort        = 990
-$PassivePortRange  = 50000-50100      # keep narrow
 $AdminMgmtCIDRs    = @("172.20.240.0/24")  # admin VLAN(s) allowed for RDP/management
 $AllowRdp          = $false              # set $false to fully disable RDP inbound
 $EnableFtpsOnly    = $false              # requires IIS FTP configured for SSL
@@ -104,10 +101,10 @@ Write-Host "[OK] Firewall policy set: block inbound / block outbound."
 Get-NetFirewallRule -Direction Inbound -ErrorAction SilentlyContinue | Disable-NetFirewallRule -ErrorAction SilentlyContinue
 
 # --- Allow FTP control + passive ports (TCP) ---
-New-NetFirewallRule -DisplayName "CCDC-FTP-Control" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $FtpControlPort -Profile Any | Out-Null
-New-NetFirewallRule -DisplayName "CCDC-FTP-Passive" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $PassivePortRange -Profile Any | Out-Null
-New-NetFirewallRule -DisplayName "CCDC-FTP-Control" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $FtpSSLPort -Profile Any | Out-Null
-Write-Host "[OK] Firewall allows FTP control ($FtpControlPort) + passive ($PassivePortRange)."
+Set-NetFirewallRule -DisplayName "FTP Server (FTP Traffic-In)" -Enabled True
+Set-NetFirewallRule -DisplayName "FTP Server Passive (FTP Passive Traffic-In)" -Enabled True
+Set-NetFirewallRule -DisplayName "FTP Server Secure (FTP SSL Traffic-In)" -Enabled True
+Write-Host "[OK] Firewall allows FTP control"
 
 # --- Allow outbound ports for basic functionality ---
 New-NetFirewallRule -DisplayName "CCDC-DNS-TCP" -Direction Outbound -Action Allow -Protocol TCP -RemotePort 53 -Profile Any | Out-Null
